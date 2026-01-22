@@ -352,9 +352,9 @@ class PodcastViewModel(
                         val downloadsOrdered = _downloads.value
                             .filter { download ->
                                 download.status.name != "DELETED" &&
-                                    download.episode.id.isNotBlank() &&
-                                    download.episode.title.isNotBlank() &&
-                                    download.episode.audioUrl.isNotBlank()
+                                        download.episode.id.isNotBlank() &&
+                                        download.episode.title.isNotBlank() &&
+                                        download.episode.audioUrl.isNotBlank()
                             }
                             .sortedByDescending { it.episode.publishDateMillis }
 
@@ -409,7 +409,26 @@ class PodcastViewModel(
             return
         }
 
-        // 3) If we still can't map this media item to a known episode, stop playback so
+        val extras = mediaItem.mediaMetadata.extras
+        if (extras != null && extras.containsKey("episodeId")) {
+            val reconstructedEpisode = Episode(
+                id = extras.getString("episodeId") ?: "",
+                podcastId = extras.getString("podcastId") ?: "",
+                podcastTitle = extras.getString("podcastTitle") ?: "",
+                title = mediaItem.mediaMetadata.title.toString(),
+                description = extras.getString("description"),
+                publishDate = extras.getString("publishDate") ?: "",
+                publishDateMillis = extras.getLong("publishDateMillis"),
+                duration = extras.getString("duration") ?: "",
+                audioUrl = extras.getString("audioUrl") ?: "",
+                downloadedPath = extras.getString("downloadedPath")
+            )
+            _currentEpisode.value = reconstructedEpisode
+            _currentArtworkUri.value = mediaItem.mediaMetadata.artworkUri
+            return
+        }
+
+        // 4) If we still can't map this media item to a known episode, stop playback so
         //    we don't end up with "ghost" playback that the UI can't represent.
         controller.stop()
         _isPlaying.value = false
@@ -442,8 +461,21 @@ class PodcastViewModel(
     }
 
     private fun observeDownloads() {
+        var lastLoadedIds: Set<String> = emptySet()
         downloadManager.downloads.onEach { downloadList ->
             _downloads.value = downloadList
+
+            val currentIds = downloadList.map { it.episode.id }.toSet()
+            if (currentIds != lastLoadedIds && currentIds.isNotEmpty()) {
+                lastLoadedIds = currentIds
+                try {
+                    val positions = playbackPositionDao.getPlaybackPositions(currentIds.toList())
+                    val newPositions = positions.associateBy { it.episodeId }
+                    _playbackPositions.value = newPositions + _playbackPositions.value
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error loading playback positions for downloads", e)
+                }
+            }
         }.launchIn(viewModelScope)
     }
 
@@ -490,7 +522,7 @@ class PodcastViewModel(
                 val cachedPodcasts = subscriptionManager.getSubscriptions()
                 _subscriptions.value = cachedPodcasts.sortedBy { it.title }
                 _isLoading.value = false
-                
+
                 // Run refresh in background
                 _isFetchingLatestEpisodes.value = true
                 val refreshedPodcasts = refreshSubscribedPodcastEpisodes()
@@ -506,9 +538,9 @@ class PodcastViewModel(
 
     fun updateSearchQuery(query: String) {
         _searchQuery.value = query
-        
+
         searchJob?.cancel()
-        
+
         if (query.isBlank()) {
             _searchResults.value = emptyList()
             _isLoading.value = false
@@ -755,9 +787,14 @@ class PodcastViewModel(
     private fun playEpisode(
         episode: Episode,
         restart: Boolean = false,
-        context: AutoplayContext
+        context: AutoplayContext,
+        autoPlay: Boolean = true,
+        showFullPlayer: Boolean = true
     ) {
         lastAutoplayContext = context
+
+        settingsManager.saveLastPlayedEpisode(episode, context.name)
+
         viewModelScope.launch {
             if (_currentEpisode.value != null && _currentPosition.longValue > 0) {
                 repository.savePlaybackPosition(
@@ -765,11 +802,14 @@ class PodcastViewModel(
                     position = _currentPosition.longValue
                 )
             }
-            
+
             var episodeToPlay = episode
+
             val download = _downloads.value.find { it.episode.id == episode.id }
             if (download?.downloadUri != null) {
                 episodeToPlay = episode.copy(audioUrl = download.downloadUri)
+            } else if (episode.downloadedPath != null) {
+                episodeToPlay = episode.copy(audioUrl = episode.downloadedPath)
             }
 
             var details = currentPodcastDetails.value
@@ -800,6 +840,17 @@ class PodcastViewModel(
                 .setTitle(episode.title)
                 .setArtist(details?.podcast?.title)
                 .setArtworkUri(artworkUri)
+                .setExtras(android.os.Bundle().apply {
+                    putString("episodeId", episode.id)
+                    putString("podcastId", episode.podcastId)
+                    putString("podcastTitle", details?.podcast?.title ?: episode.podcastTitle)
+                    putString("description", episode.description)
+                    putString("publishDate", episode.publishDate)
+                    putLong("publishDateMillis", episode.publishDateMillis)
+                    putString("duration", episode.duration)
+                    putString("audioUrl", episode.audioUrl)
+                    putString("downloadedPath", episode.downloadedPath)
+                })
                 .build()
 
             val mediaItem = MediaItem.Builder()
@@ -810,14 +861,18 @@ class PodcastViewModel(
 
             mediaController?.setMediaItem(mediaItem, lastPosition)
             mediaController?.prepare()
-            mediaController?.play()
+
+            if (autoPlay) {
+                mediaController?.play()
+                if (settingsManager.isSleepTimerEnabledSync() && settingsManager.getSleepTimerMinutesSync() > 0) {
+                    startSleepTimer()
+                }
+            } else {
+                mediaController?.pause()
+            }
 
             _currentEpisode.value = episodeToPlay
-            _showFullPlayer.value = true
-            
-            if (settingsManager.isSleepTimerEnabledSync() && settingsManager.getSleepTimerMinutesSync() > 0) {
-                startSleepTimer()
-            }
+            _showFullPlayer.value = showFullPlayer
         }
     }
 
@@ -959,18 +1014,18 @@ class PodcastViewModel(
 
     fun startSleepTimer() {
         if (_sleepTimerMinutes.intValue <= 0) return
-        
+
         _isSleepTimerActive.value = true
         settingsManager.setSleepTimerActive(true)
         _sleepTimerRemainingSeconds.longValue = (_sleepTimerMinutes.intValue * 60).toLong()
-        
+
         sleepTimerJob?.cancel()
         sleepTimerJob = viewModelScope.launch {
             while (_sleepTimerRemainingSeconds.longValue > 0) {
                 delay(1000)
                 _sleepTimerRemainingSeconds.longValue -= 1
             }
-            
+
             if (_sleepTimerRemainingSeconds.longValue <= 0) {
                 mediaController?.pause()
                 _isSleepTimerActive.value = false
