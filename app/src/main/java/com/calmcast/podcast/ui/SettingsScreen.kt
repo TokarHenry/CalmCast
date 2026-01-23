@@ -1,7 +1,6 @@
 package com.calmcast.podcast.ui
 
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -9,7 +8,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.RadioButton
-import androidx.compose.material3.Switch
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -25,8 +23,6 @@ import com.calmcast.podcast.ui.common.DashedDivider
 import com.mudita.mmd.components.lazy.LazyColumnMMD
 import com.mudita.mmd.components.tabs.PrimaryTabRowMMD
 import com.mudita.mmd.components.tabs.TabMMD
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.height
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.runtime.key
 import androidx.compose.ui.unit.sp
@@ -36,7 +32,6 @@ import com.mudita.mmd.components.text.TextMMD
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
-    settingsManager: SettingsManager,
     isPictureInPictureEnabled: Boolean,
     onPictureInPictureToggle: (Boolean) -> Unit,
     isAutoDownloadEnabled: Boolean,
@@ -90,7 +85,9 @@ fun SettingsScreen(
         }
 
         key(selectedTab) {
-            LazyColumnMMD(modifier = Modifier.fillMaxSize()) {
+            LazyColumnMMD(
+                modifier = Modifier.weight(1f)
+            ) {
                 if (selectedTab == 0) {
                     item {
                         Row(

@@ -91,7 +91,6 @@ import kotlinx.coroutines.launch
 
 sealed class Screen(val route: String, val label: String, val icon: ImageVector) {
     object Subscriptions : Screen("subscriptions", "Following", Icons.Outlined.StarBorder)
-//    object Search : Screen("search", "Search", Icons.Outlined.Search)
     object Downloads : Screen("downloads", "Downloads", Icons.Outlined.Download)
     object Settings : Screen("settings", "Settings", Icons.Outlined.Settings)
 }
@@ -185,7 +184,6 @@ fun CalmCastApp(pipStateHolder: androidx.compose.runtime.MutableState<Boolean>, 
             .collect { playing -> onIsPlayingChanged(playing) }
     }
 
-    // Keep screen on when requested in full player
     val activity = LocalContext.current as? android.app.Activity
     DisposableEffect(viewModel.isKeepScreenOnEnabled.value, viewModel.showFullPlayer.value) {
         val shouldKeepOn = viewModel.isKeepScreenOnEnabled.value && viewModel.showFullPlayer.value
@@ -271,7 +269,7 @@ fun CalmCastApp(pipStateHolder: androidx.compose.runtime.MutableState<Boolean>, 
 
         Box(modifier = Modifier.fillMaxSize()) {
             Scaffold(
-                snackbarHost = { 
+                snackbarHost = {
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -304,7 +302,7 @@ fun CalmCastApp(pipStateHolder: androidx.compose.runtime.MutableState<Boolean>, 
                                         },
                                         modifier = Modifier.focusRequester(focusRequester)
                                     )
-                                 } else {
+                                } else {
                                     Column {
                                         val title = getAppBarTitle(currentDestination?.route, viewModel)
                                         Text(
@@ -327,7 +325,7 @@ fun CalmCastApp(pipStateHolder: androidx.compose.runtime.MutableState<Boolean>, 
                                             }
                                         }
                                     }
-                                 }
+                                }
                             },
                             navigationIcon = {
                                 if (canNavigateBack) {
@@ -378,7 +376,7 @@ fun CalmCastApp(pipStateHolder: androidx.compose.runtime.MutableState<Boolean>, 
                                         }
                                     }
                                 }
-                                
+
                                 if (currentDestination?.route == "subscriptions") {
                                     ButtonMMD(
                                         contentPadding = PaddingValues(0.dp),
@@ -522,7 +520,7 @@ fun CalmCastApp(pipStateHolder: androidx.compose.runtime.MutableState<Boolean>, 
                                     scope.launch {
                                         snackbarHostState.showSnackbar("Unfollowed ${podcast.title}")
                                     }
-                                 } else {
+                                } else {
                                     viewModel.subscribeToPodcast(podcast)
                                     scope.launch {
                                         snackbarHostState.showSnackbar("Followed ${podcast.title}")
@@ -605,6 +603,7 @@ fun CalmCastApp(pipStateHolder: androidx.compose.runtime.MutableState<Boolean>, 
                     ) {
                         val downloads = viewModel.downloads.value.sortedByDescending { it.episode.publishDateMillis }
                         val playbackPositions = viewModel.playbackPositions.value
+
                         DownloadsScreen(
                             downloads = downloads,
                             playbackPositions = playbackPositions,
@@ -636,7 +635,6 @@ fun CalmCastApp(pipStateHolder: androidx.compose.runtime.MutableState<Boolean>, 
                         popExitTransition = { ExitTransition.None }
                     ) {
                         SettingsScreen(
-                            settingsManager = settingsManager,
                             isPictureInPictureEnabled = viewModel.isPictureInPictureEnabled.value,
                             onPictureInPictureToggle = { enabled ->
                                 viewModel.setPictureInPictureEnabled(enabled)

@@ -81,6 +81,8 @@ fun PodcastDetailScreen(
     val showDescriptionModal = remember { mutableStateOf(false) }
     var isDescriptionTruncated by remember { mutableStateOf(false) }
 
+    var selectedEpisodeForInfo by remember { mutableStateOf<Episode?>(null) }
+
     if (showDescriptionModal.value) {
         ModalBottomSheetMMD(
             onDismissRequest = { showDescriptionModal.value = false }
@@ -93,6 +95,35 @@ fun PodcastDetailScreen(
                 SafeHtmlText(
                     html = podcast.description
                 )
+                Spacer(modifier = Modifier.height(16.dp))
+            }
+        }
+    }
+
+    if (selectedEpisodeForInfo != null) {
+        ModalBottomSheetMMD(
+            onDismissRequest = { selectedEpisodeForInfo = null }
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 400.dp)
+                    .verticalScroll(rememberScrollState())
+                    .padding(start = 16.dp, end = 16.dp)
+            ) {
+                Text(
+                    text = selectedEpisodeForInfo?.title?.takeIf { it.isNotBlank() } ?: "Episode",
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.Black,
+                    modifier = Modifier.padding(bottom = 16.dp, top = 16.dp)
+                )
+                if (!selectedEpisodeForInfo?.description.isNullOrEmpty()) {
+                    SafeHtmlText(
+                        html = selectedEpisodeForInfo?.description ?: "",
+                        forceBlackText = true
+                    )
+                }
                 Spacer(modifier = Modifier.height(16.dp))
             }
         }
@@ -132,11 +163,52 @@ fun PodcastDetailScreen(
             }
         }
 
+        Column(
+            modifier = Modifier.padding(start = 16.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Episodes (${episodes.size})",
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(end = 16.dp)
+                ) {
+                    if (isLoadingEpisodes) {
+                        CircularProgressIndicatorMMD(
+                            modifier = Modifier
+                                .size(20.dp)
+                                .padding(end = 8.dp)
+                        )
+                    }
+                    IconButton(
+                        onClick = onRefreshClick,
+                        modifier = Modifier.size(20.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.Refresh,
+                            contentDescription = "Refresh episodes",
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                }
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+            HorizontalDividerMMD(thickness = 3.dp)
+        }
+
         LazyColumnMMD(
             modifier = Modifier
-                .fillMaxHeight()
                 .weight(1f)
-                .padding(start = 16.dp, end = 0.dp, top = 0.dp, bottom = 0.dp)
+                .padding(start = 16.dp, end = 0.dp, top = 0.dp, bottom = 0.dp),
+            contentPadding = PaddingValues(top = 16.dp, bottom = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             when {
                 isLoadingEpisodes && episodes.isEmpty() -> {
@@ -171,45 +243,6 @@ fun PodcastDetailScreen(
                         val playbackPosition = playbackPositions[episode.id]
                         val isCurrentlyPlaying = episode.id == currentPlayingEpisodeId
 
-                        if (index == 0) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(
-                                    text = "Episodes (${episodes.size})",
-                                    fontSize = 16.sp,
-                                    fontWeight = FontWeight.SemiBold
-                                )
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    if (isLoadingEpisodes) {
-                                        CircularProgressIndicatorMMD(
-                                            modifier = Modifier
-                                                .size(20.dp)
-                                                .padding(end = 8.dp)
-                                        )
-                                    }
-                                    IconButton(
-                                        onClick = onRefreshClick,
-                                        modifier = Modifier.size(20.dp)
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Outlined.Refresh,
-                                            contentDescription = "Refresh episodes",
-                                            modifier = Modifier.size(20.dp)
-                                        )
-                                    }
-                                }
-                            }
-
-                            Spacer(modifier = Modifier.height(8.dp))
-
-                            HorizontalDividerMMD(thickness = 3.dp)
-                        }
-
                         EpisodeItem(
                             episode = episode,
                             download = download,
@@ -223,7 +256,8 @@ fun PodcastDetailScreen(
                             onPauseClick = { onPauseClick(episode) },
                             onCancelClick = { onCancelClick(episode) },
                             onResumeClick = { onResumeClick(episode) },
-                            removeDividers = removeDividers
+                            onInfoClick = { selectedEpisodeForInfo = episode }, // Pass event up
+                            removeDividers = removeDividers,
                         )
                     }
                 }
@@ -248,49 +282,40 @@ fun EpisodeItem(
     onPauseClick: () -> Unit = {},
     onCancelClick: () -> Unit = {},
     onResumeClick: () -> Unit = {},
+    onInfoClick: () -> Unit = {},
     removeDividers: Boolean = false,
     customPaddingValues: PaddingValues? = null
 ) {
-    val showDescriptionModal = remember { mutableStateOf(false) }
     val formattedDate = remember(episode.id, episode.publishDate) {
         DateTimeFormatter.formatPublishDate(episode.publishDate)
     }
-    val formattedDuration = remember(episode.id, episode.duration) {
-        DateTimeFormatter.formatDurationFromString(episode.duration)
+
+    fun formatMillis(millis: Long): String {
+        val totalSeconds = millis / 1000
+        val hours = totalSeconds / 3600
+        val minutes = (totalSeconds % 3600) / 60
+        val seconds = totalSeconds % 60
+        return if (hours > 0) {
+            "%d:%02d:%02d".format(hours, minutes, seconds)
+        } else {
+            "%d:%02d".format(minutes, seconds)
+        }
     }
 
-    if (showDescriptionModal.value && !episode.description.isNullOrEmpty()) {
-        ModalBottomSheetMMD(
-            onDismissRequest = { showDescriptionModal.value = false }
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(max = 400.dp)
-                    .verticalScroll(rememberScrollState())
-                    .padding(start = 16.dp, end = 16.dp)
-            ) {
-                Text(
-                    text = episode.title.takeIf { it.isNotBlank() } ?: "Episode",
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color.Black,
-                    modifier = Modifier.padding(bottom = 16.dp, top = 16.dp)
-                )
-                if (episode.description.isNotBlank()) {
-                    SafeHtmlText(
-                        html = episode.description,
-                        forceBlackText = true
-                    )
-                }
-                Spacer(modifier = Modifier.height(16.dp))
-            }
+    val durationText = remember(episode.id, episode.duration, playbackPosition?.position) {
+        val totalDurationStr = DateTimeFormatter.formatDurationFromString(episode.duration)
+        val position = playbackPosition?.position ?: 0L
+
+        if (position > 0) {
+            "${formatMillis(position)} - $totalDurationStr"
+        } else {
+            totalDurationStr
         }
     }
 
     Column(
         modifier = Modifier
-            .padding(start = 0.dp, end = 0.dp, top = 16.dp, bottom = 0.dp)
+            .padding(start = 0.dp, end = 0.dp, top = 0.dp, bottom = 0.dp)
             .clickable(onClick = onClick)
     ) {
         Row(
@@ -300,7 +325,6 @@ fun EpisodeItem(
         ) {
             Column(
                 modifier = Modifier
-                    .fillMaxHeight()
                     .padding(end = 16.dp),
                 verticalArrangement = Arrangement.Center,
                 horizontalAlignment = Alignment.Start
@@ -308,7 +332,7 @@ fun EpisodeItem(
                 if (isCurrentlyPlaying) {
                     if (isBuffering) {
                         Box(
-                            modifier = Modifier.size(24.dp),
+                            modifier = Modifier.size(20.dp),
                             contentAlignment = Alignment.Center
                         ) {
                             CircularProgressIndicatorMMD()
@@ -317,7 +341,7 @@ fun EpisodeItem(
                         Icon(
                             imageVector = Icons.Outlined.Headphones,
                             contentDescription = "Playing",
-                            modifier = Modifier.size(24.dp)
+                            modifier = Modifier.size(20.dp)
                         )
                     }
 
@@ -327,19 +351,18 @@ fun EpisodeItem(
                     DownloadStatus.DOWNLOADED -> {
                         IconButton(
                             onClick = onDeleteClick,
-                            modifier = Modifier
-                                .size(24.dp)
+                            modifier = Modifier.size(20.dp)
                         ) {
                             Icon(
                                 imageVector = Icons.Outlined.Delete,
                                 contentDescription = "Delete",
-                                modifier = Modifier.size(24.dp)
+                                modifier = Modifier.size(20.dp)
                             )
                         }
                     }
                     DownloadStatus.DOWNLOADING -> {
                         Box(
-                            modifier = Modifier.size(24.dp),
+                            modifier = Modifier.size(20.dp),
                             contentAlignment = Alignment.Center
                         ) {
                             CircularProgressIndicatorMMD()
@@ -349,34 +372,31 @@ fun EpisodeItem(
                         Icon(
                             imageVector = Icons.Outlined.Pause,
                             contentDescription = "Paused",
-                            modifier = Modifier.size(24.dp),
+                            modifier = Modifier.size(20.dp),
                             tint = MaterialTheme.colorScheme.secondary
                         )
                     }
                     DownloadStatus.FAILED, DownloadStatus.CANCELED, DownloadStatus.STORAGE_UNAVAILABLE -> {
-                        // For failed, canceled, or storage unavailable downloads, show delete icon to remove them
                         IconButton(
                             onClick = onDeleteClick,
-                            modifier = Modifier
-                                .size(24.dp)
+                            modifier = Modifier.size(20.dp)
                         ) {
                             Icon(
                                 imageVector = Icons.Outlined.Delete,
                                 contentDescription = "Delete",
-                                modifier = Modifier.size(24.dp)
+                                modifier = Modifier.size(20.dp)
                             )
                         }
                     }
                     else -> {
                         IconButton(
                             onClick = onDownloadClick,
-                            modifier = Modifier
-                                .size(24.dp)
+                            modifier = Modifier.size(20.dp)
                         ) {
                             Icon(
                                 imageVector = Icons.Outlined.Download,
                                 contentDescription = "Download",
-                                modifier = Modifier.size(24.dp)
+                                modifier = Modifier.size(20.dp)
                             )
                         }
                     }
@@ -386,117 +406,147 @@ fun EpisodeItem(
             Column(
                 modifier = Modifier
                     .weight(1f)
-                    .padding(customPaddingValues ?: PaddingValues(0.dp))
+                    .padding(
+                        customPaddingValues ?: PaddingValues(
+                            start = 0.dp,
+                            end = 0.dp,
+                            top = 0.dp,
+                            bottom = 0.dp
+                        )
+                    )
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        text = episode.title,
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.Bold,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f)
-                    )
-                    if (!episode.description.isNullOrEmpty()) {
-                        IconButton(
-                            onClick = { showDescriptionModal.value = true },
-                            modifier = Modifier.size(24.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Outlined.Info,
-                                contentDescription = "View description",
-                                modifier = Modifier.size(20.dp)
+                Column(
+                    modifier = Modifier
+                        .padding(
+                            PaddingValues(
+                                start = 0.dp,
+                                end = 16.dp,
+                                top = 0.dp,
+                                bottom = 0.dp
                             )
-                        }
-                    }
-                }
-                if (showPodcastName) {
-                    Spacer(modifier = Modifier.height(4.dp))
-
-                    Text(
-                        text = episode.podcastTitle,
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.Normal,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-                Spacer(modifier = Modifier.height(8.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
+                        )
                 ) {
-                    Text(
-                        text = formattedDate,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Normal
-                    )
-                    Text(
-                        text = formattedDuration,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Normal
-                    )
-                }
-
-                if (download?.status == DownloadStatus.DOWNLOADING || download?.status == DownloadStatus.PAUSED) {
-                    Spacer(modifier = Modifier.height(16.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        LinearProgressIndicatorMMD(
-                            progress = { download.progress.coerceIn(0f, 1f) },
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = episode.title,
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.weight(1f)
                         )
-
-                        IconButton(
-                            onClick = if (download.status == DownloadStatus.DOWNLOADING) onPauseClick else onResumeClick,
-                            modifier = Modifier.size(24.dp)
-                        ) {
-                            Icon(
-                                imageVector = if (download.status == DownloadStatus.DOWNLOADING) Icons.Outlined.Pause else Icons.Outlined.PlayArrow,
-                                contentDescription = if (download.status == DownloadStatus.DOWNLOADING) "Pause" else "Resume",
-                                modifier = Modifier.size(24.dp)
-                            )
-                        }
-
-                        IconButton(
-                            onClick = onCancelClick,
-                            modifier = Modifier.size(24.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Outlined.Close,
-                                contentDescription = "Cancel",
-                                modifier = Modifier.size(24.dp)
-                            )
+                        if (!episode.description.isNullOrEmpty()) {
+                            IconButton(
+                                onClick = onInfoClick,
+                                modifier = Modifier.size(20.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Outlined.Info,
+                                    contentDescription = "View description",
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
                         }
                     }
-                } else if (download?.status == DownloadStatus.STORAGE_UNAVAILABLE) {
-                    Spacer(modifier = Modifier.height(16.dp))
-                    Text(
-                        text = "External storage unavailable. Check SD card and try again.",
-                        fontSize = 12.sp,
-                        color = Color.Red
-                    )
-                } else if (playbackPosition != null && playbackPosition.position > 0) {
-                    val durationInSeconds = DateTimeFormatter.parseDuration(episode.duration)
-                    if (durationInSeconds != null && durationInSeconds > 0) {
-                        val durationInMilliseconds = durationInSeconds * 1000
-                        Spacer(modifier = Modifier.height(16.dp))
-                        LinearProgressIndicatorMMD(
-                            progress = { playbackPosition.position.toFloat() / durationInMilliseconds },
-                            modifier = Modifier.fillMaxWidth()
+
+                    if (showPodcastName) {
+                        Spacer(modifier = Modifier.height(4.dp))
+
+                        Text(
+                            text = episode.podcastTitle,
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Normal,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
                 }
 
-                Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(8.dp))
 
-                if (!isLastItem && !removeDividers) {
+                Column(
+                    modifier = Modifier
+                        .padding(
+                            PaddingValues(
+                                start = 0.dp,
+                                end = 16.dp,
+                                top = 0.dp,
+                                bottom = 0.dp
+                            )
+                        )
+                ) {
+                    when (download?.status) {
+                        DownloadStatus.DOWNLOADING, DownloadStatus.PAUSED -> {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                LinearProgressIndicatorMMD(
+                                    progress = { download.progress.coerceIn(0f, 1f) },
+                                    modifier = Modifier.weight(1f)
+                                )
+
+                                IconButton(
+                                    onClick = if (download.status == DownloadStatus.DOWNLOADING) onPauseClick else onResumeClick,
+                                    modifier = Modifier.size(16.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = if (download.status == DownloadStatus.DOWNLOADING) Icons.Outlined.Pause else Icons.Outlined.PlayArrow,
+                                        contentDescription = if (download.status == DownloadStatus.DOWNLOADING) "Pause" else "Resume",
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+
+                                IconButton(
+                                    onClick = onCancelClick,
+                                    modifier = Modifier.size(16.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Outlined.Close,
+                                        contentDescription = "Cancel",
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                            }
+                        }
+
+                        DownloadStatus.STORAGE_UNAVAILABLE -> {
+                            Text(
+                                text = "Ext storage unavailable",
+                                fontSize = 12.sp,
+                                color = Color.Red,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+
+                        else -> {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = formattedDate,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Normal
+                                )
+
+                                Text(
+                                    text = durationText,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Normal
+                                )
+                            }
+                        }
+                    }
+                }
+
+                if (!removeDividers && !isLastItem) {
                     DashedDivider(
                         thickness = 1.dp,
-                        modifier = Modifier.padding(vertical = 0.dp)
+                        modifier = Modifier.padding(top = 16.dp)
                     )
                 }
             }
