@@ -11,13 +11,11 @@ import androidx.compose.material3.RadioButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import com.calmcast.podcast.data.SettingsManager
 import com.calmcast.podcast.data.DownloadLocation
 import com.calmcast.podcast.ui.common.DashedDivider
 import com.mudita.mmd.components.lazy.LazyColumnMMD
@@ -25,6 +23,7 @@ import com.mudita.mmd.components.tabs.PrimaryTabRowMMD
 import com.mudita.mmd.components.tabs.TabMMD
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.ui.unit.sp
 import com.mudita.mmd.components.switcher.SwitchMMD
 import com.mudita.mmd.components.text.TextMMD
@@ -63,7 +62,7 @@ fun SettingsScreen(
     var selectedTab by remember { mutableIntStateOf(0) }
     
     // Local state to track playback speed for UI updates
-    var localPlaybackSpeed by remember(playbackSpeed) { mutableStateOf(playbackSpeed) }
+    var localPlaybackSpeed by remember(playbackSpeed) { mutableFloatStateOf(playbackSpeed) }
 
     Column(
         modifier = Modifier.fillMaxSize()

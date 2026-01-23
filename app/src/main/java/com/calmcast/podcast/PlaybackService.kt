@@ -2,6 +2,7 @@ package com.calmcast.podcast
 
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.os.Build
@@ -26,9 +27,9 @@ class PlaybackService : MediaSessionService() {
         private const val NOTIFICATION_ID = 123
         private const val CHANNEL_ID = "playback_channel"
         private const val TAG = "PlaybackService"
-        
+
         private var errorCallback: ((PlaybackException) -> Unit)? = null
-        
+
         fun setErrorCallback(callback: ((PlaybackException) -> Unit)?) {
             errorCallback = callback
         }
@@ -38,9 +39,9 @@ class PlaybackService : MediaSessionService() {
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
-        
+
         val player = ExoPlayer.Builder(this).build()
-        
+
         // Configure audio attributes for podcast content
         val audioAttributes = androidx.media3.common.AudioAttributes.Builder()
             .setUsage(androidx.media3.common.C.USAGE_MEDIA)
@@ -48,18 +49,30 @@ class PlaybackService : MediaSessionService() {
             .build()
         // Set audioAttributes with handleAudioFocus=true to let ExoPlayer manage audio focus
         player.setAudioAttributes(audioAttributes, true)
-        
+
         // Handle headphone unplug and audio becoming noisy
         player.setHandleAudioBecomingNoisy(true)
-        
+
         player.addListener(object : Player.Listener {
             override fun onPlayerError(error: PlaybackException) {
                 errorCallback?.invoke(error)
                 super.onPlayerError(error)
             }
         })
-        
-        mediaSession = MediaSession.Builder(this, player).build()
+
+        val sessionActivityIntent = Intent(this, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+        }
+        val sessionActivityPendingIntent = PendingIntent.getActivity(
+            this,
+            0,
+            sessionActivityIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+
+        mediaSession = MediaSession.Builder(this, player)
+            .setSessionActivity(sessionActivityPendingIntent)
+            .build()
 
         val notificationProvider = DefaultMediaNotificationProvider.Builder(this)
             .setChannelId(CHANNEL_ID)

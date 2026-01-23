@@ -2,6 +2,7 @@ package com.calmcast.podcast
 
 import android.app.Application
 import androidx.work.Configuration
+import com.calmcast.podcast.data.NowPlayingStorage
 import com.calmcast.podcast.data.PodcastDatabase
 import com.calmcast.podcast.data.SettingsManager
 import com.calmcast.podcast.data.SubscriptionManager
@@ -18,9 +19,12 @@ import java.util.concurrent.TimeUnit
 
 class CalmCastApplication : Application(), Configuration.Provider {
 
-    // Centralized dependencies
     lateinit var subscriptionManager: SubscriptionManager
     lateinit var downloadManager: AndroidDownloadManager
+
+    val nowPlayingStorage: NowPlayingStorage by lazy {
+        NowPlayingStorage(this)
+    }
 
     override val workManagerConfiguration: Configuration
         get() = Configuration.Builder().build()
@@ -40,7 +44,6 @@ class CalmCastApplication : Application(), Configuration.Provider {
         subscriptionManager = SubscriptionManager(this, podcastDao)
         downloadManager = AndroidDownloadManager(this, okHttpClient, downloadDao, settingsManager)
 
-        // Build a cached OkHttpClient for RSS/ItunesApiService
         val rssCacheDir = File(cacheDir, "http_rss_cache")
         if (!rssCacheDir.exists()) rssCacheDir.mkdirs()
         val rssCache = Cache(rssCacheDir, 50L * 1024 * 1024)

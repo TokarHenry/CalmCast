@@ -18,10 +18,13 @@ import androidx.media3.common.Player
 import androidx.media3.common.PlaybackParameters
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
+import com.calmcast.podcast.CalmCastApplication
 import com.calmcast.podcast.PlaybackService
 import com.calmcast.podcast.PlaybackError
 import com.calmcast.podcast.api.FeedGoneException
 import com.calmcast.podcast.api.FeedNotFoundException
+import com.calmcast.podcast.data.NowPlayingStorage
+import com.calmcast.podcast.data.PodcastSnapshot
 import com.calmcast.podcast.data.PlaybackPosition
 import com.calmcast.podcast.data.PlaybackPositionDao
 import com.calmcast.podcast.data.Podcast
@@ -48,6 +51,8 @@ import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import okhttp3.Cache
 import okhttp3.Interceptor
 import okhttp3.OkHttpClient
@@ -76,6 +81,10 @@ class PodcastViewModel(
         podcastDao,
         playbackPositionDao
     )
+
+    private val nowPlayingStorage: NowPlayingStorage by lazy {
+        (application as CalmCastApplication).nowPlayingStorage
+    }
 
     private val _subscriptions = mutableStateOf<List<Podcast>>(emptyList())
     val subscriptions: State<List<Podcast>> = _subscriptions
@@ -228,6 +237,7 @@ class PodcastViewModel(
     init {
         cleanupInvalidDownloads()
         loadInitialData()
+        restoreState() // Restore playback state on cold start
         observeDownloads()
         initializeMediaController()
         registerPlaybackServiceErrorCallback()
@@ -322,6 +332,64 @@ class PodcastViewModel(
         }
     }
 
+    private fun restoreState() {
+        viewModelScope.launch {
+            val snapshot = withContext(Dispatchers.IO) {
+                nowPlayingStorage.load()
+            } ?: return@launch
+
+            val episode = snapshot.episode
+            val contextType = snapshot.contextType
+            val positionMs = snapshot.positionMs
+            val speed = snapshot.playbackSpeed
+            val artworkUrl = snapshot.artworkUrl
+
+            _currentEpisode.value = episode
+            _currentPosition.longValue = positionMs
+            _duration.longValue = DateTimeFormatter.parseDuration(episode.duration)?.times(1000L) ?: 0L
+            setPlaybackSpeed(speed)
+
+            if (artworkUrl != null) {
+                _currentArtworkUri.value = artworkUrl.toUri()
+            }
+
+            if (contextType == AutoplayContext.PODCAST.name) {
+                lastAutoplayContext = AutoplayContext.PODCAST
+                launch {
+                    val details = repository.getPodcastDetails(episode.podcastId).first().getOrNull()
+                    if (details != null) {
+                        _currentPodcastDetails.value = details
+                        if (_currentArtworkUri.value == null) {
+                            _currentArtworkUri.value = details.podcast.imageUrl?.toUri()
+                        }
+                    }
+                }
+            } else {
+                lastAutoplayContext = AutoplayContext.DOWNLOADS
+            }
+        }
+    }
+
+    private fun persistSnapshot() {
+        val episode = _currentEpisode.value ?: return
+        val position = _currentPosition.longValue
+        val speed = _playbackSpeed.value
+        val context = lastAutoplayContext.name
+        val artwork = _currentArtworkUri.value?.toString()
+
+        viewModelScope.launch(Dispatchers.IO) {
+            nowPlayingStorage.save(
+                PodcastSnapshot(
+                    episode = episode,
+                    contextType = context,
+                    positionMs = position,
+                    playbackSpeed = speed,
+                    artworkUrl = artwork
+                )
+            )
+        }
+    }
+
     private inner class PlayerListener : Player.Listener {
         override fun onIsPlayingChanged(isPlaying: Boolean) {
             _isPlaying.value = isPlaying
@@ -329,6 +397,7 @@ class PodcastViewModel(
                 startPositionUpdates()
             } else {
                 stopPositionUpdates()
+                persistSnapshot()
             }
         }
 
@@ -386,10 +455,12 @@ class PodcastViewModel(
     private fun handleMediaItemChange(mediaItem: MediaItem?) {
         val controller = mediaController ?: return
         if (mediaItem == null) {
-            // Nothing selected, just clear state
-            _currentEpisode.value = null
-            _isPlaying.value = false
-            stopPositionUpdates()
+            if (_currentEpisode.value != null && controller.playbackState == Player.STATE_IDLE) {
+                val restoredEp = _currentEpisode.value!!
+                val restoredPos = _currentPosition.longValue
+                preparePlayerForRestoredItem(restoredEp, restoredPos)
+                return
+            }
             return
         }
 
@@ -428,12 +499,57 @@ class PodcastViewModel(
             return
         }
 
-        // 4) If we still can't map this media item to a known episode, stop playback so
-        //    we don't end up with "ghost" playback that the UI can't represent.
+        // 4) If we still can't map this media item to a known episode, stop playback
         controller.stop()
         _isPlaying.value = false
         _currentEpisode.value = null
         stopPositionUpdates()
+    }
+
+    private fun preparePlayerForRestoredItem(episode: Episode, startPositionMs: Long) {
+        val controller = mediaController ?: return
+
+        // Ensure we have correct URL (downloaded or stream)
+        var episodeToPlay = episode
+        val download = _downloads.value.find { it.episode.id == episode.id }
+        if (download?.downloadUri != null) {
+            episodeToPlay = episode.copy(audioUrl = download.downloadUri)
+        } else if (episode.downloadedPath != null) {
+            episodeToPlay = episode.copy(audioUrl = episode.downloadedPath)
+        }
+
+        val artworkUri = _currentArtworkUri.value
+
+        val mediaMetadata = MediaMetadata.Builder()
+            .setTitle(episode.title)
+            .setArtist(episode.podcastTitle)
+            .setArtworkUri(artworkUri)
+            .setExtras(android.os.Bundle().apply {
+                putString("episodeId", episode.id)
+                putString("podcastId", episode.podcastId)
+                putString("podcastTitle", episode.podcastTitle)
+                putString("description", episode.description)
+                putString("publishDate", episode.publishDate)
+                putLong("publishDateMillis", episode.publishDateMillis)
+                putString("duration", episode.duration)
+                putString("audioUrl", episode.audioUrl)
+                putString("downloadedPath", episode.downloadedPath)
+            })
+            .build()
+
+        val mediaItem = MediaItem.Builder()
+            .setUri(episodeToPlay.audioUrl)
+            .setMediaId(episode.id)
+            .setMediaMetadata(mediaMetadata)
+            .build()
+
+        controller.setMediaItem(mediaItem, startPositionMs)
+        controller.prepare()
+        controller.pause() // Start paused on restore
+
+        // Restore speed
+        val params = PlaybackParameters(_playbackSpeed.value)
+        controller.playbackParameters = params
     }
 
     private fun initializeMediaController() {
@@ -445,12 +561,20 @@ class PodcastViewModel(
             mediaController = controller
             controller.addListener(playerListener)
 
-            _currentPosition.longValue = controller.currentPosition
-            _duration.longValue = controller.duration
-            _isPlaying.value = controller.isPlaying
-            _isBuffering.value = controller.playbackState == Player.STATE_BUFFERING
-
-            handleMediaItemChange(controller.currentMediaItem)
+            if (controller.playbackState != Player.STATE_IDLE && controller.currentMediaItem != null) {
+                // Player is already alive (service running), sync UI to it
+                _currentPosition.longValue = controller.currentPosition
+                _duration.longValue = controller.duration
+                _isPlaying.value = controller.isPlaying
+                _isBuffering.value = controller.playbackState == Player.STATE_BUFFERING
+                handleMediaItemChange(controller.currentMediaItem)
+            } else {
+                // Player is fresh/idle. If we restored state, push it to player now.
+                val restoredEp = _currentEpisode.value
+                if (restoredEp != null) {
+                    preparePlayerForRestoredItem(restoredEp, _currentPosition.longValue)
+                }
+            }
 
             if (controller.isPlaying) {
                 startPositionUpdates()
@@ -502,6 +626,9 @@ class PodcastViewModel(
                             lastPlayed = currentTime
                         )
                         _playbackPositions.value = _playbackPositions.value + (episodeId to updatedPosition)
+
+                        // Persist snapshot periodically
+                        persistSnapshot()
                     }
                 }
                 delay(500)
@@ -793,8 +920,6 @@ class PodcastViewModel(
     ) {
         lastAutoplayContext = context
 
-        settingsManager.saveLastPlayedEpisode(episode, context.name)
-
         viewModelScope.launch {
             if (_currentEpisode.value != null && _currentPosition.longValue > 0) {
                 repository.savePlaybackPosition(
@@ -873,6 +998,7 @@ class PodcastViewModel(
 
             _currentEpisode.value = episodeToPlay
             _showFullPlayer.value = showFullPlayer
+            persistSnapshot()
         }
     }
 
@@ -888,6 +1014,7 @@ class PodcastViewModel(
                     episodeId = _currentEpisode.value!!.id,
                     position = _currentPosition.longValue
                 )
+                persistSnapshot()
             }
         }
     }
@@ -911,6 +1038,7 @@ class PodcastViewModel(
                     episodeId = _currentEpisode.value!!.id,
                     position = _currentPosition.longValue
                 )
+                persistSnapshot()
             }
         }
     }
@@ -1085,6 +1213,7 @@ class PodcastViewModel(
                     episodeId = _currentEpisode.value!!.id,
                     position = _currentPosition.longValue
                 )
+                persistSnapshot()
             }
         }
         controllerFuture?.let {
