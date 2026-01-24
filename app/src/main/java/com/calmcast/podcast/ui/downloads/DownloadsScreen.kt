@@ -29,6 +29,7 @@ import com.calmcast.podcast.data.PodcastRepository.Episode
 import com.calmcast.podcast.data.download.Download
 import com.calmcast.podcast.ui.common.SafeHtmlText
 import com.calmcast.podcast.ui.podcastdetail.EpisodeItem
+import com.calmcast.podcast.utils.DateTimeFormatter
 import com.mudita.mmd.components.bottom_sheet.ModalBottomSheetMMD
 import com.mudita.mmd.components.lazy.LazyColumnMMD
 import androidx.compose.foundation.layout.Spacer
@@ -85,12 +86,14 @@ fun DownloadsScreen(
                     download.episode.let { episode ->
                         episode.id.isNotBlank() && episode.title.isNotBlank() && episode.audioUrl.isNotBlank()
                     }
-                } catch (e: Exception) {
+                } catch (_: Exception) {
                     hasError.value = true
                     false
                 }
-            }.sortedByDescending { it.episode.publishDateMillis }
-        } catch (e: Exception) {
+            }.sortedByDescending {
+                DateTimeFormatter.parseDateToMillis(it.episode.publishDate) ?: 0L
+            }
+        } catch (_: Exception) {
             hasError.value = true
             emptyList()
         }
