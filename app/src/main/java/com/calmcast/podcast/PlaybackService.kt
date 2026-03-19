@@ -21,6 +21,7 @@ import androidx.media3.session.DefaultMediaNotificationProvider
 import androidx.media3.session.LibraryResult
 import androidx.media3.session.MediaLibraryService
 import androidx.media3.session.MediaSession
+import com.calmapps.calmcast.R
 import com.calmcast.podcast.api.ItunesApiService
 import com.calmcast.podcast.data.PodcastDatabase
 import com.calmcast.podcast.data.PodcastRepository
@@ -190,6 +191,26 @@ class PlaybackService : MediaLibraryService() {
 
         // Cached search results for the current search session
         private var searchResults: List<MediaItem> = emptyList()
+        // Cache to quickly resolve playable items when Android Auto tries to play from a browse node
+        private val playableItemCache = mutableMapOf<String, MediaItem>()
+
+        override fun onConnect(
+            session: MediaSession,
+            controller: MediaSession.ControllerInfo
+        ): MediaSession.ConnectionResult {
+            val connectionResult = super.onConnect(session, controller)
+            
+            // Remove the timeline command from available commands to disable the Android Auto Queue button
+            val playerCommands = connectionResult.availablePlayerCommands.buildUpon()
+                .remove(Player.COMMAND_GET_TIMELINE)
+                .remove(Player.COMMAND_CHANGE_MEDIA_ITEMS)
+                .build()
+                
+            return MediaSession.ConnectionResult.accept(
+                connectionResult.availableSessionCommands,
+                playerCommands
+            )
+        }
 
         override fun onGetLibraryRoot(
             session: MediaLibrarySession,
@@ -416,7 +437,7 @@ class PlaybackService : MediaLibraryService() {
                     val episode = download.episode
                     val audioUri = (download.downloadUri ?: episode.audioUrl).toUri()
 
-                    MediaItem.Builder()
+                    val item = MediaItem.Builder()
                         .setMediaId(episode.id)
                         .setUri(audioUri)
                         .setMediaMetadata(
@@ -440,6 +461,9 @@ class PlaybackService : MediaLibraryService() {
                                 .build()
                         )
                         .build()
+                        
+                    playableItemCache[episode.id] = item
+                    item
                 }
             return ImmutableList.copyOf(items)
         }
@@ -452,7 +476,7 @@ class PlaybackService : MediaLibraryService() {
                 val artworkUri = podcast.imageUrl?.toUri()
 
                 val items = podcastWithEpisodes.episodes.map { episode ->
-                    MediaItem.Builder()
+                    val item = MediaItem.Builder()
                         .setMediaId(episode.id)
                         .setUri(episode.audioUrl.toUri())
                         .setMediaMetadata(
@@ -477,6 +501,9 @@ class PlaybackService : MediaLibraryService() {
                                 .build()
                         )
                         .build()
+                        
+                    playableItemCache[episode.id] = item
+                    item
                 }
                 return ImmutableList.copyOf(items)
             } catch (e: Exception) {
@@ -514,7 +541,10 @@ class PlaybackService : MediaLibraryService() {
         }
 
         private suspend fun resolveMediaItem(mediaId: String): MediaItem? {
-            // Check downloads first
+            // Check memory cache first (fixes streaming crashes for browsed episodes)
+            playableItemCache[mediaId]?.let { return it }
+
+            // Check downloads fallback
             try {
                 val database = PodcastDatabase.getDatabase(this@PlaybackService)
                 val downloadDao = database.downloadDao()

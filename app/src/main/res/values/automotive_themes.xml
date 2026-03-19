@@ -12,13 +12,13 @@
         <item name="colorOnSurfaceVariant">@color/auto_on_surface_variant_light</item>
     </style>
 
-    <!-- Light mode colors - calm, warm tones matching the app's aesthetic -->
-    <color name="auto_primary_light">#5B4FC7</color>
+    <!-- Light mode colors - strict black and white -->
+    <color name="auto_primary_light">#000000</color>
     <color name="auto_on_primary_light">#FFFFFF</color>
-    <color name="auto_primary_container_light">#E8E0FF</color>
-    <color name="auto_on_primary_container_light">#1A0066</color>
-    <color name="auto_surface_light">#FDFBFF</color>
-    <color name="auto_on_surface_light">#1C1B1F</color>
-    <color name="auto_surface_variant_light">#E7E0EC</color>
-    <color name="auto_on_surface_variant_light">#49454F</color>
+    <color name="auto_primary_container_light">#FFFFFF</color>
+    <color name="auto_on_primary_container_light">#000000</color>
+    <color name="auto_surface_light">#FFFFFF</color>
+    <color name="auto_on_surface_light">#000000</color>
+    <color name="auto_surface_variant_light">#FFFFFF</color>
+    <color name="auto_on_surface_variant_light">#000000</color>
 </resources>
