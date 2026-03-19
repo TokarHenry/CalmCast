@@ -28,4 +28,7 @@ interface DownloadDao {
 
     @Query("DELETE FROM downloads WHERE episode_id IS NULL OR episode_id = '' OR episode_title IS NULL OR episode_title = '' OR episode_audioUrl IS NULL OR episode_audioUrl = ''")
     suspend fun deleteInvalidDownloads()
+
+    @Query("SELECT * FROM downloads ORDER BY episode_id ASC")
+    suspend fun getAllDownloadsOnce(): List<Download>
 }

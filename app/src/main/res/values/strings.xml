@@ -14,4 +14,9 @@
     <string name="loading_podcasts">Loading your podcasts. Please wait…</string>
     <string name="no_results">No results found</string>
     <string name="no_episodes">No episodes available</string>
+
+    <!-- Android Auto browse nodes -->
+    <string name="auto_subscriptions">Subscriptions</string>
+    <string name="auto_downloads">Downloads</string>
+    <string name="auto_search_results">Search Results</string>
 </resources>
