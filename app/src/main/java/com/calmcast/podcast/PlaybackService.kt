@@ -17,10 +17,13 @@ import androidx.media3.common.Player
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.session.CommandButton
 import androidx.media3.session.DefaultMediaNotificationProvider
 import androidx.media3.session.LibraryResult
 import androidx.media3.session.MediaLibraryService
 import androidx.media3.session.MediaSession
+import androidx.media3.session.SessionCommand
+import androidx.media3.session.SessionResult
 import com.calmapps.calmcast.R
 import com.calmcast.podcast.api.ItunesApiService
 import com.calmcast.podcast.data.PodcastDatabase
@@ -73,6 +76,26 @@ class PlaybackService : MediaLibraryService() {
 
         fun setErrorCallback(callback: ((PlaybackException) -> Unit)?) {
             errorCallback = callback
+        }
+
+        val COMMAND_TOGGLE_SPEED = SessionCommand("CUSTOM_ACTION_TOGGLE_SPEED", Bundle.EMPTY)
+        
+        private val speedNames = mapOf(1.0f to "1x", 1.25f to "1.25x", 1.5f to "1.5x", 2.0f to "2x", 0.8f to "0.8x")
+        
+        fun getSpeedButton(speed: Float): CommandButton {
+            val displaySpeed = speedNames.entries.minByOrNull { kotlin.math.abs(it.key - speed) }?.value ?: "1x"
+            val iconResId = when (displaySpeed) {
+                "0.8x" -> R.drawable.ic_speed_0_8x
+                "1.25x" -> R.drawable.ic_speed_1_25x
+                "1.5x" -> R.drawable.ic_speed_1_5x
+                "2x" -> R.drawable.ic_speed_2x
+                else -> R.drawable.ic_speed_1x
+            }
+            return CommandButton.Builder()
+                .setDisplayName("Speed: $displaySpeed")
+                .setIconResId(iconResId)
+                .setSessionCommand(COMMAND_TOGGLE_SPEED)
+                .build()
         }
     }
 
@@ -206,10 +229,52 @@ class PlaybackService : MediaLibraryService() {
                 .remove(Player.COMMAND_CHANGE_MEDIA_ITEMS)
                 .build()
                 
+            val sessionCommands = connectionResult.availableSessionCommands.buildUpon()
+                .add(COMMAND_TOGGLE_SPEED)
+                .build()
+                
             return MediaSession.ConnectionResult.accept(
-                connectionResult.availableSessionCommands,
+                sessionCommands,
                 playerCommands
             )
+        }
+
+        override fun onPostConnect(session: MediaSession, controller: MediaSession.ControllerInfo) {
+            super.onPostConnect(session, controller)
+            val currentSpeed = session.player.playbackParameters.speed
+            session.setCustomLayout(controller, ImmutableList.of(getSpeedButton(currentSpeed)))
+        }
+
+        override fun onCustomCommand(
+            session: MediaSession,
+            controller: MediaSession.ControllerInfo,
+            customCommand: SessionCommand,
+            args: Bundle
+        ): ListenableFuture<SessionResult> {
+            if (customCommand.customAction == COMMAND_TOGGLE_SPEED.customAction) {
+                val currentSpeed = session.player.playbackParameters.speed
+                val nextSpeed = when {
+                    currentSpeed < 1.0f -> 1.0f
+                    currentSpeed < 1.25f -> 1.25f
+                    currentSpeed < 1.5f -> 1.5f
+                    currentSpeed < 2.0f -> 2.0f
+                    else -> 0.8f
+                }
+                session.player.setPlaybackSpeed(nextSpeed)
+                
+                // Keep the phone's UI in perfectly synced state
+                (applicationContext as? com.calmcast.podcast.CalmCastApplication)?.let { app ->
+                    app.settingsManager.setPlaybackSpeed(nextSpeed)
+                }
+                
+                // Update layout for all connected controllers
+                val button = getSpeedButton(nextSpeed)
+                session.connectedControllers.forEach { connectedController ->
+                    session.setCustomLayout(connectedController, ImmutableList.of(button))
+                }
+                return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
+            }
+            return super.onCustomCommand(session, controller, customCommand, args)
         }
 
         override fun onGetLibraryRoot(

@@ -21,6 +21,7 @@ class CalmCastApplication : Application(), Configuration.Provider {
 
     lateinit var subscriptionManager: SubscriptionManager
     lateinit var downloadManager: AndroidDownloadManager
+    lateinit var settingsManager: SettingsManager
 
     val nowPlayingStorage: NowPlayingStorage by lazy {
         NowPlayingStorage(this)
@@ -40,7 +41,7 @@ class CalmCastApplication : Application(), Configuration.Provider {
         val database = PodcastDatabase.getDatabase(this)
         val downloadDao = database.downloadDao()
         val podcastDao = database.podcastDao()
-        val settingsManager = SettingsManager(this)
+        settingsManager = SettingsManager(this)
         subscriptionManager = SubscriptionManager(this, podcastDao)
         downloadManager = AndroidDownloadManager(this, okHttpClient, downloadDao, settingsManager)
 
